@@ -1,22 +1,22 @@
-use super::super::engine::Transaction;
+use super::super::engine::TransactionTrait;
 use super::super::plan::Direction;
 use super::super::types::{Column, Expression, Row, Value};
 use super::{Executor, ResultSet};
 use crate::error::{Error, Result};
 
 /// A filter executor
-pub struct Filter<T: Transaction> {
+pub struct Filter<T: TransactionTrait> {
     source: Box<dyn Executor<T>>,
     predicate: Expression,
 }
 
-impl<T: Transaction> Filter<T> {
+impl<T: TransactionTrait> Filter<T> {
     pub fn new(source: Box<dyn Executor<T>>, predicate: Expression) -> Box<Self> {
         Box::new(Self { source, predicate })
     }
 }
 
-impl<T: Transaction> Executor<T> for Filter<T> {
+impl<T: TransactionTrait> Executor<T> for Filter<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { columns, rows } = self.source.execute(txn)? {
             let predicate = self.predicate;
@@ -42,12 +42,12 @@ impl<T: Transaction> Executor<T> for Filter<T> {
 }
 
 /// A projection executor
-pub struct Projection<T: Transaction> {
+pub struct Projection<T: TransactionTrait> {
     source: Box<dyn Executor<T>>,
     expressions: Vec<(Expression, Option<String>)>,
 }
 
-impl<T: Transaction> Projection<T> {
+impl<T: TransactionTrait> Projection<T> {
     pub fn new(
         source: Box<dyn Executor<T>>,
         expressions: Vec<(Expression, Option<String>)>,
@@ -56,7 +56,7 @@ impl<T: Transaction> Projection<T> {
     }
 }
 
-impl<T: Transaction> Executor<T> for Projection<T> {
+impl<T: TransactionTrait> Executor<T> for Projection<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { columns, rows } = self.source.execute(txn)? {
             let (expressions, labels): (Vec<Expression>, Vec<Option<String>>) =
@@ -87,18 +87,18 @@ impl<T: Transaction> Executor<T> for Projection<T> {
 }
 
 /// An ORDER BY executor
-pub struct Order<T: Transaction> {
+pub struct Order<T: TransactionTrait> {
     source: Box<dyn Executor<T>>,
     order: Vec<(Expression, Direction)>,
 }
 
-impl<T: Transaction> Order<T> {
+impl<T: TransactionTrait> Order<T> {
     pub fn new(source: Box<dyn Executor<T>>, order: Vec<(Expression, Direction)>) -> Box<Self> {
         Box::new(Self { source, order })
     }
 }
 
-impl<T: Transaction> Executor<T> for Order<T> {
+impl<T: TransactionTrait> Executor<T> for Order<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         match self.source.execute(txn)? {
             ResultSet::Query { columns, mut rows } => {
@@ -147,18 +147,18 @@ impl<T: Transaction> Executor<T> for Order<T> {
 }
 
 /// A LIMIT executor
-pub struct Limit<T: Transaction> {
+pub struct Limit<T: TransactionTrait> {
     source: Box<dyn Executor<T>>,
     limit: u64,
 }
 
-impl<T: Transaction> Limit<T> {
+impl<T: TransactionTrait> Limit<T> {
     pub fn new(source: Box<dyn Executor<T>>, limit: u64) -> Box<Self> {
         Box::new(Self { source, limit })
     }
 }
 
-impl<T: Transaction> Executor<T> for Limit<T> {
+impl<T: TransactionTrait> Executor<T> for Limit<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { columns, rows } = self.source.execute(txn)? {
             Ok(ResultSet::Query { columns, rows: Box::new(rows.take(self.limit as usize)) })
@@ -169,18 +169,18 @@ impl<T: Transaction> Executor<T> for Limit<T> {
 }
 
 /// An OFFSET executor
-pub struct Offset<T: Transaction> {
+pub struct Offset<T: TransactionTrait> {
     source: Box<dyn Executor<T>>,
     offset: u64,
 }
 
-impl<T: Transaction> Offset<T> {
+impl<T: TransactionTrait> Offset<T> {
     pub fn new(source: Box<dyn Executor<T>>, offset: u64) -> Box<Self> {
         Box::new(Self { source, offset })
     }
 }
 
-impl<T: Transaction> Executor<T> for Offset<T> {
+impl<T: TransactionTrait> Executor<T> for Offset<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { columns, rows } = self.source.execute(txn)? {
             Ok(ResultSet::Query { columns, rows: Box::new(rows.skip(self.offset as usize)) })

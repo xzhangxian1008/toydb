@@ -1,6 +1,6 @@
 use super::super::schema::{Catalog, Table, Tables};
 use super::super::types::{Expression, Row, Value};
-use super::{Engine as _, IndexScan, Mode, Scan, Transaction as _};
+use super::{EngineTrait as _, IndexScan, Mode, Scan, TransactionTrait as _};
 use crate::error::{Error, Result};
 use crate::raft;
 use crate::storage::kv;
@@ -75,8 +75,8 @@ impl Raft {
     }
 
     /// Creates an underlying state machine for a Raft engine.
-    pub fn new_state(kv: kv::MVCC) -> Result<State> {
-        State::new(kv)
+    pub fn new_state_machine(kv: kv::MVCC) -> Result<StateMachine> {
+        StateMachine::new(kv)
     }
 
     /// Returns Raft SQL engine status.
@@ -100,21 +100,21 @@ impl Raft {
     }
 }
 
-impl super::Engine for Raft {
-    type Transaction = Transaction;
+impl super::EngineTrait for Raft {
+    type Transaction = RaftTransaction;
 
     fn begin(&self, mode: Mode) -> Result<Self::Transaction> {
-        Transaction::begin(self.client.clone(), mode)
+        RaftTransaction::begin(self.client.clone(), mode)
     }
 
     fn resume(&self, id: u64) -> Result<Self::Transaction> {
-        Transaction::resume(self.client.clone(), id)
+        RaftTransaction::resume(self.client.clone(), id)
     }
 }
 
 /// A Raft-based SQL transaction
 #[derive(Clone)]
-pub struct Transaction {
+pub struct RaftTransaction {
     /// The underlying Raft cluster
     client: raft::Client,
     /// The transaction ID
@@ -123,7 +123,7 @@ pub struct Transaction {
     mode: Mode,
 }
 
-impl Transaction {
+impl RaftTransaction {
     /// Starts a transaction in the given mode
     fn begin(client: raft::Client, mode: Mode) -> Result<Self> {
         let id = Raft::deserialize(&futures::executor::block_on(
@@ -147,11 +147,11 @@ impl Transaction {
 
     /// Executes a query
     fn query(&self, query: Query) -> Result<Vec<u8>> {
-        futures::executor::block_on(self.client.query(Raft::serialize(&query)?))
+        futures::executor::block_on(self.client.query(Raft::serialize(&query)?)) // study: drive client to send a query request to the raft
     }
 }
 
-impl super::Transaction for Transaction {
+impl super::TransactionTrait for RaftTransaction {
     fn id(&self) -> u64 {
         self.id
     }
@@ -235,7 +235,7 @@ impl super::Transaction for Transaction {
     }
 }
 
-impl Catalog for Transaction {
+impl Catalog for RaftTransaction {
     fn create_table(&mut self, table: Table) -> Result<()> {
         Raft::deserialize(&self.mutate(Mutation::CreateTable { txn_id: self.id, schema: table })?)
     }
@@ -261,14 +261,14 @@ impl Catalog for Transaction {
 }
 
 /// The Raft state machine for the Raft-based SQL engine, using a KV SQL engine
-pub struct State {
+pub struct StateMachine {
     /// The underlying KV SQL engine
-    engine: super::KV,
+    underlying_engine: super::KV,
     /// The last applied index
     applied_index: u64,
 }
 
-impl State {
+impl StateMachine {
     /// Creates a new Raft state maching using the given MVCC key/value store
     pub fn new(store: kv::MVCC) -> Result<Self> {
         let engine = super::KV::new(store);
@@ -276,85 +276,87 @@ impl State {
             .get_metadata(b"applied_index")?
             .map(|b| Raft::deserialize(&b))
             .unwrap_or(Ok(0))?;
-        Ok(State { engine, applied_index })
+        Ok(StateMachine { underlying_engine: engine, applied_index })
     }
 
     /// Applies a state machine mutation
+    // study: raft apply here, it is called by StateMachine's mutate functon
     fn apply(&mut self, mutation: Mutation) -> Result<Vec<u8>> {
         match mutation {
-            Mutation::Begin(mode) => Raft::serialize(&self.engine.begin(mode)?.id()),
-            Mutation::Commit(txn_id) => Raft::serialize(&self.engine.resume(txn_id)?.commit()?),
-            Mutation::Rollback(txn_id) => Raft::serialize(&self.engine.resume(txn_id)?.rollback()?),
+            Mutation::Begin(mode) => Raft::serialize(&self.underlying_engine.begin(mode)?.id()),
+            Mutation::Commit(txn_id) => Raft::serialize(&self.underlying_engine.resume(txn_id)?.commit()?),
+            Mutation::Rollback(txn_id) => Raft::serialize(&self.underlying_engine.resume(txn_id)?.rollback()?),
 
             Mutation::Create { txn_id, table, row } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.create(&table, row)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.create(&table, row)?)
             }
             Mutation::Delete { txn_id, table, id } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.delete(&table, &id)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.delete(&table, &id)?)
             }
             Mutation::Update { txn_id, table, id, row } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.update(&table, &id, row)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.update(&table, &id, row)?)
             }
 
             Mutation::CreateTable { txn_id, schema } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.create_table(schema)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.create_table(schema)?)
             }
             Mutation::DeleteTable { txn_id, table } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.delete_table(&table)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.delete_table(&table)?)
             }
         }
     }
 }
 
-impl raft::State for State {
+impl raft::StateMachine for StateMachine {
     fn applied_index(&self) -> u64 {
         self.applied_index
     }
 
+    // study: it is called by the Driver's execute function
     fn mutate(&mut self, index: u64, command: Vec<u8>) -> Result<Vec<u8>> {
         // We don't check that index == applied_index + 1, since the Raft log commits no-op
         // entries during leader election which we need to ignore.
         match self.apply(Raft::deserialize(&command)?) {
             error @ Err(Error::Internal(_)) => error,
             result => {
-                self.engine.set_metadata(b"applied_index", Raft::serialize(&(index))?)?;
+                self.underlying_engine.set_metadata(b"applied_index", Raft::serialize(&(index))?)?;
                 self.applied_index = index;
                 result
             }
         }
     }
 
-    fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
+    fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> { // study: read is executed here
         match Raft::deserialize(&command)? {
             Query::Resume(id) => {
-                let txn = self.engine.resume(id)?;
+                let txn = self.underlying_engine.resume(id)?;
                 Raft::serialize(&(txn.id(), txn.mode()))
             }
 
             Query::Read { txn_id, table, id } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.read(&table, &id)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.read(&table, &id)?)
             }
             Query::ReadIndex { txn_id, table, column, value } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.read_index(&table, &column, &value)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.read_index(&table, &column, &value)?)
             }
             // FIXME These need to stream rows somehow
             Query::Scan { txn_id, table, filter } => Raft::serialize(
-                &self.engine.resume(txn_id)?.scan(&table, filter)?.collect::<Result<Vec<_>>>()?,
+                &self.underlying_engine.resume(txn_id)?.scan(&table, filter)?.collect::<Result<Vec<_>>>()?,
             ),
             Query::ScanIndex { txn_id, table, column } => Raft::serialize(
                 &self
-                    .engine
+                    .underlying_engine
                     .resume(txn_id)?
                     .scan_index(&table, &column)?
                     .collect::<Result<Vec<_>>>()?,
             ),
-            Query::Status => Raft::serialize(&self.engine.kv.status()?),
+            Query::Status => Raft::serialize(&self.underlying_engine.kv.status()?),
 
             Query::ReadTable { txn_id, table } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.read_table(&table)?)
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.read_table(&table)?)
             }
             Query::ScanTables { txn_id } => {
-                Raft::serialize(&self.engine.resume(txn_id)?.scan_tables()?.collect::<Vec<_>>())
+                Raft::serialize(&self.underlying_engine.resume(txn_id)?.scan_tables()?.collect::<Vec<_>>())
             }
         }
     }

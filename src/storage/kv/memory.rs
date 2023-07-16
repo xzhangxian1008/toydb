@@ -1,4 +1,4 @@
-use super::{Range, Scan, Store};
+use super::{Range, Scan, StoreTrait};
 use crate::error::{Error, Result};
 
 use std::cmp::Ordering;
@@ -46,7 +46,7 @@ impl Memory {
     }
 }
 
-impl Store for Memory {
+impl StoreTrait for Memory {
     fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.root.write()?.delete(key);
         Ok(())

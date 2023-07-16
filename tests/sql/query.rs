@@ -1,7 +1,7 @@
 ///! Tests for the SQL query engine. Runs SQL queries against an in-memory database,
 ///! and compares the results with golden files stored under tests/sql/query/
 use toydb::error::{Error, Result};
-use toydb::sql::engine::{Engine, Mode, Transaction};
+use toydb::sql::engine::{EngineTrait, Mode, TransactionTrait};
 use toydb::sql::execution::ResultSet;
 use toydb::sql::parser::Parser;
 use toydb::sql::plan::Plan;

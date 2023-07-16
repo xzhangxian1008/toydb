@@ -1,4 +1,4 @@
-use super::{Memory, Range, Scan, Store};
+use super::{Memory, Range, Scan, StoreTrait};
 use crate::error::Result;
 
 use std::fmt::Display;
@@ -24,7 +24,7 @@ impl Display for Test {
     }
 }
 
-impl Store for Test {
+impl StoreTrait for Test {
     fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.kv.write()?.delete(key)
     }

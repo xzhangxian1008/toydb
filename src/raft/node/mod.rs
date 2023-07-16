@@ -2,7 +2,7 @@ mod candidate;
 mod follower;
 mod leader;
 
-use super::{Address, Driver, Event, Instruction, Log, Message, State};
+use super::{Address, Driver, Event, Instruction, Log, Message, StateMachine};
 use crate::error::{Error, Result};
 use candidate::Candidate;
 use follower::Follower;
@@ -48,7 +48,7 @@ impl Node {
         id: &str,
         peers: Vec<String>,
         log: Log,
-        mut state: Box<dyn State>,
+        mut state: Box<dyn StateMachine>,
         node_tx: mpsc::UnboundedSender<Message>,
     ) -> Result<Self> {
         let applied_index = state.applied_index();

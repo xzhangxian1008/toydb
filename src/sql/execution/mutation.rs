@@ -1,4 +1,4 @@
-use super::super::engine::Transaction;
+use super::super::engine::TransactionTrait;
 use super::super::schema::Table;
 use super::super::types::{Expression, Row, Value};
 use super::{Executor, ResultSet};
@@ -56,7 +56,8 @@ impl Insert {
     }
 }
 
-impl<T: Transaction> Executor<T> for Insert {
+impl<T: TransactionTrait> Executor<T> for Insert {
+    // study: Here is the entry of insertion
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         let table = txn.must_read_table(&self.table)?;
         let mut count = 0;
@@ -76,13 +77,13 @@ impl<T: Transaction> Executor<T> for Insert {
 }
 
 /// An UPDATE executor
-pub struct Update<T: Transaction> {
+pub struct Update<T: TransactionTrait> {
     table: String,
     source: Box<dyn Executor<T>>,
     expressions: Vec<(usize, Expression)>,
 }
 
-impl<T: Transaction> Update<T> {
+impl<T: TransactionTrait> Update<T> {
     pub fn new(
         table: String,
         source: Box<dyn Executor<T>>,
@@ -92,7 +93,7 @@ impl<T: Transaction> Update<T> {
     }
 }
 
-impl<T: Transaction> Executor<T> for Update<T> {
+impl<T: TransactionTrait> Executor<T> for Update<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         match self.source.execute(txn)? {
             ResultSet::Query { mut rows, .. } => {
@@ -126,18 +127,18 @@ impl<T: Transaction> Executor<T> for Update<T> {
 }
 
 /// A DELETE executor
-pub struct Delete<T: Transaction> {
+pub struct Delete<T: TransactionTrait> {
     table: String,
     source: Box<dyn Executor<T>>,
 }
 
-impl<T: Transaction> Delete<T> {
+impl<T: TransactionTrait> Delete<T> {
     pub fn new(table: String, source: Box<dyn Executor<T>>) -> Box<Self> {
         Box::new(Self { table, source })
     }
 }
 
-impl<T: Transaction> Executor<T> for Delete<T> {
+impl<T: TransactionTrait> Executor<T> for Delete<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         let table = txn.must_read_table(&self.table)?;
         let mut count = 0;

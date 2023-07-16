@@ -4,6 +4,12 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
+  {
+    "type": "lldb",
+    "request": "attach",
+    "name": "xzx_toydb",
+    "pid": "1583768" // use ${command:pickProcess} to pick other users' processes
+  },
     {
       "type": "lldb",
       "request": "launch",

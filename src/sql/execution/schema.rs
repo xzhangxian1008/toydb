@@ -1,4 +1,4 @@
-use super::super::engine::Transaction;
+use super::super::engine::TransactionTrait;
 use super::super::schema::Table;
 use super::{Executor, ResultSet};
 use crate::error::Result;
@@ -14,7 +14,7 @@ impl CreateTable {
     }
 }
 
-impl<T: Transaction> Executor<T> for CreateTable {
+impl<T: TransactionTrait> Executor<T> for CreateTable {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         let name = self.table.name.clone();
         txn.create_table(self.table)?;
@@ -33,7 +33,7 @@ impl DropTable {
     }
 }
 
-impl<T: Transaction> Executor<T> for DropTable {
+impl<T: TransactionTrait> Executor<T> for DropTable {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         txn.delete_table(&self.table)?;
         Ok(ResultSet::DropTable { name: self.table })

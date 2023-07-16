@@ -16,7 +16,7 @@ use std::fmt::Display;
 use std::ops::{Bound, RangeBounds};
 
 /// A key/value store.
-pub trait Store: Display + Send + Sync {
+pub trait StoreTrait: Display + Send + Sync {
     /// Deletes a key, or does nothing if it does not exist.
     fn delete(&mut self, key: &[u8]) -> Result<()>;
 
@@ -94,7 +94,7 @@ impl RangeBounds<Vec<u8>> for Range {
 pub type Scan = Box<dyn DoubleEndedIterator<Item = Result<(Vec<u8>, Vec<u8>)>> + Send>;
 
 #[cfg(test)]
-trait TestSuite<S: Store> {
+trait TestSuite<S: StoreTrait> {
     fn setup() -> Result<S>;
 
     fn test() -> Result<()> {

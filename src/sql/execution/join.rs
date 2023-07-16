@@ -1,4 +1,4 @@
-use super::super::engine::Transaction;
+use super::super::engine::TransactionTrait;
 use super::super::types::{Expression, Rows};
 use super::{Executor, ResultSet, Row, Value};
 use crate::error::{Error, Result};
@@ -7,14 +7,14 @@ use std::collections::HashMap;
 
 /// A nested loop join executor, which checks each row in the left source against every row in
 /// the right source using the given predicate.
-pub struct NestedLoopJoin<T: Transaction> {
+pub struct NestedLoopJoin<T: TransactionTrait> {
     left: Box<dyn Executor<T>>,
     right: Box<dyn Executor<T>>,
     predicate: Option<Expression>,
     outer: bool,
 }
 
-impl<T: Transaction> NestedLoopJoin<T> {
+impl<T: TransactionTrait> NestedLoopJoin<T> {
     pub fn new(
         left: Box<dyn Executor<T>>,
         right: Box<dyn Executor<T>>,
@@ -25,7 +25,7 @@ impl<T: Transaction> NestedLoopJoin<T> {
     }
 }
 
-impl<T: Transaction> Executor<T> for NestedLoopJoin<T> {
+impl<T: TransactionTrait> Executor<T> for NestedLoopJoin<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { mut columns, rows } = self.left.execute(txn)? {
             if let ResultSet::Query { columns: rcolumns, rows: rrows } = self.right.execute(txn)? {
@@ -141,7 +141,7 @@ impl Iterator for NestedLoopRows {
 }
 
 /// A hash join executor
-pub struct HashJoin<T: Transaction> {
+pub struct HashJoin<T: TransactionTrait> {
     left: Box<dyn Executor<T>>,
     left_field: usize,
     right: Box<dyn Executor<T>>,
@@ -149,7 +149,7 @@ pub struct HashJoin<T: Transaction> {
     outer: bool,
 }
 
-impl<T: Transaction> HashJoin<T> {
+impl<T: TransactionTrait> HashJoin<T> {
     pub fn new(
         left: Box<dyn Executor<T>>,
         left_field: usize,
@@ -161,7 +161,7 @@ impl<T: Transaction> HashJoin<T> {
     }
 }
 
-impl<T: Transaction> Executor<T> for HashJoin<T> {
+impl<T: TransactionTrait> Executor<T> for HashJoin<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { mut columns, rows } = self.left.execute(txn)? {
             if let ResultSet::Query { columns: rcolumns, rows: rrows } = self.right.execute(txn)? {

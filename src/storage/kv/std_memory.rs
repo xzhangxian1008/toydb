@@ -1,4 +1,4 @@
-use super::{Range, Scan, Store};
+use super::{Range, Scan, StoreTrait};
 use crate::error::Result;
 
 use std::collections::BTreeMap;
@@ -22,7 +22,7 @@ impl Display for StdMemory {
     }
 }
 
-impl Store for StdMemory {
+impl StoreTrait for StdMemory {
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }

@@ -1,4 +1,4 @@
-use super::engine::Transaction;
+use super::engine::TransactionTrait;
 use super::parser::format_ident;
 use super::types::{DataType, Value};
 use crate::error::{Error, Result};
@@ -95,7 +95,7 @@ impl Table {
     }
 
     /// Validates the table schema
-    pub fn validate(&self, txn: &mut dyn Transaction) -> Result<()> {
+    pub fn validate(&self, txn: &mut dyn TransactionTrait) -> Result<()> {
         if self.columns.is_empty() {
             return Err(Error::Value(format!("Table {} has no columns", self.name)));
         }
@@ -111,7 +111,7 @@ impl Table {
     }
 
     /// Validates a row
-    pub fn validate_row(&self, row: &[Value], txn: &mut dyn Transaction) -> Result<()> {
+    pub fn validate_row(&self, row: &[Value], txn: &mut dyn TransactionTrait) -> Result<()> {
         if row.len() != self.columns.len() {
             return Err(Error::Value(format!("Invalid row size for table {}", self.name)));
         }
@@ -157,7 +157,7 @@ pub struct Column {
 
 impl Column {
     /// Validates the column schema
-    pub fn validate(&self, table: &Table, txn: &mut dyn Transaction) -> Result<()> {
+    pub fn validate(&self, table: &Table, txn: &mut dyn TransactionTrait) -> Result<()> {
         // Validate primary key
         if self.primary_key && self.nullable {
             return Err(Error::Value(format!("Primary key {} cannot be nullable", self.name)));
@@ -220,7 +220,7 @@ impl Column {
         table: &Table,
         pk: &Value,
         value: &Value,
-        txn: &mut dyn Transaction,
+        txn: &mut dyn TransactionTrait,
     ) -> Result<()> {
         // Validate datatype
         match value.datatype() {

@@ -1,6 +1,6 @@
 ///! Evaluates SQL expressions and compares with expectations.
 use toydb::error::{Error, Result};
-use toydb::sql::engine::Engine;
+use toydb::sql::engine::EngineTrait;
 use toydb::sql::types::Value;
 
 fn eval_expr(expr: &str) -> Result<Value> {

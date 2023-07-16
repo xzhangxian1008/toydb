@@ -1,6 +1,6 @@
 use super::super::schema::{Catalog, Table, Tables};
 use super::super::types::{Expression, Row, Value};
-use super::Transaction as _;
+use super::TransactionTrait as _;
 use crate::error::{Error, Result};
 use crate::storage::kv;
 
@@ -39,8 +39,8 @@ impl KV {
     }
 }
 
-impl super::Engine for KV {
-    type Transaction = Transaction;
+impl super::EngineTrait for KV {
+    type Transaction = SQLTransaction;
 
     fn begin(&self, mode: super::Mode) -> Result<Self::Transaction> {
         Ok(Self::Transaction::new(self.kv.begin_with_mode(mode)?))
@@ -62,13 +62,13 @@ fn deserialize<'a, V: Deserialize<'a>>(bytes: &'a [u8]) -> Result<V> {
 }
 
 /// An SQL transaction based on an MVCC key/value transaction
-pub struct Transaction {
-    txn: kv::mvcc::Transaction,
+pub struct SQLTransaction {
+    txn: kv::mvcc::MVCCTransaction,
 }
 
-impl Transaction {
+impl SQLTransaction {
     /// Creates a new SQL transaction from an MVCC transaction
-    fn new(txn: kv::mvcc::Transaction) -> Self {
+    fn new(txn: kv::mvcc::MVCCTransaction) -> Self {
         Self { txn }
     }
 
@@ -99,7 +99,7 @@ impl Transaction {
     }
 }
 
-impl super::Transaction for Transaction {
+impl super::TransactionTrait for SQLTransaction {
     fn id(&self) -> u64 {
         self.txn.id()
     }
@@ -126,12 +126,15 @@ impl super::Transaction for Transaction {
                 id, table.name
             )));
         }
+
+        // todo how to insert a key
         self.txn.set(
             &Key::Row(Cow::Borrowed(&table.name), Some(Cow::Borrowed(&id))).encode(),
             serialize(&row)?,
         )?;
 
-        // Update indexes
+        // study: Update indexes
+        // todo how to update index
         for (i, column) in table.columns.iter().enumerate().filter(|(_, c)| c.index) {
             let mut index = self.index_load(&table.name, &column.name, &row[i])?;
             index.insert(id.clone());
@@ -188,6 +191,7 @@ impl super::Transaction for Transaction {
         self.index_load(table, column, value)
     }
 
+    // study: scan table
     fn scan(&self, table: &str, filter: Option<Expression>) -> Result<super::Scan> {
         let table = self.must_read_table(table)?;
         Ok(Box::new(
@@ -266,7 +270,7 @@ impl super::Transaction for Transaction {
     }
 }
 
-impl Catalog for Transaction {
+impl Catalog for SQLTransaction {
     fn create_table(&mut self, table: Table) -> Result<()> {
         if self.read_table(&table.name)?.is_some() {
             return Err(Error::Value(format!("Table {} already exists", table.name)));

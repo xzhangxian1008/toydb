@@ -14,9 +14,9 @@ use crate::error::{Error, Result};
 use std::collections::HashSet;
 
 /// The SQL engine interface
-pub trait Engine: Clone {
+pub trait EngineTrait: Clone {
     /// The transaction type
-    type Transaction: Transaction;
+    type Transaction: TransactionTrait;
 
     /// Begins a transaction in the given mode
     fn begin(&self, mode: Mode) -> Result<Self::Transaction>;
@@ -31,7 +31,7 @@ pub trait Engine: Clone {
 }
 
 /// An SQL transaction
-pub trait Transaction: Catalog {
+pub trait TransactionTrait: Catalog {
     /// The transaction ID
     fn id(&self) -> u64;
     /// The transaction mode
@@ -58,14 +58,14 @@ pub trait Transaction: Catalog {
 }
 
 /// An SQL session, which handles transaction control and simplified query execution
-pub struct Session<E: Engine> {
+pub struct Session<E: EngineTrait> {
     /// The underlying engine
     engine: E,
     /// The current session transaction, if any
     txn: Option<E::Transaction>,
 }
 
-impl<E: Engine + 'static> Session<E> {
+impl<E: EngineTrait + 'static> Session<E> {
     /// Executes a query, managing transaction status for the session
     pub fn execute(&mut self, query: &str) -> Result<ResultSet> {
         // FIXME We should match on self.txn as well, but get this error:

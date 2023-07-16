@@ -1,4 +1,4 @@
-use super::{Address, Event, Log, Message, Node, Request, Response, State};
+use super::{Address, Event, Log, Message, Node, Request, Response, StateMachine};
 use crate::error::{Error, Result};
 
 use ::log::{debug, error};
@@ -16,19 +16,19 @@ use uuid::Uuid;
 const TICK: Duration = Duration::from_millis(100);
 
 /// A Raft server.
-pub struct Server {
+pub struct RaftServer {
     node: Node,
     peers: HashMap<String, String>,
     node_rx: mpsc::UnboundedReceiver<Message>,
 }
 
-impl Server {
+impl RaftServer {
     /// Creates a new Raft cluster
     pub async fn new(
         id: &str,
         peers: HashMap<String, String>,
         log: Log,
-        state: Box<dyn State>,
+        state: Box<dyn StateMachine>,
     ) -> Result<Self> {
         let (node_tx, node_rx) = mpsc::unbounded_channel();
         Ok(Self {
@@ -81,7 +81,7 @@ impl Server {
 
         let mut ticker = tokio::time::interval(TICK);
         let mut requests = HashMap::<Vec<u8>, oneshot::Sender<Result<Response>>>::new();
-        loop {
+        loop { // study: raft event loop
             tokio::select! {
                 _ = ticker.tick() => node = node.tick()?,
 
@@ -102,7 +102,7 @@ impl Server {
                     }
                 }
 
-                Some((request, response_tx)) = client_rx.next() => {
+                Some((request, response_tx)) = client_rx.next() => { // study: client will send request to raft, raft will receive this request at here
                     let id = Uuid::new_v4().as_bytes().to_vec();
                     requests.insert(id.clone(), response_tx);
                     node = node.step(Message{

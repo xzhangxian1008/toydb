@@ -18,7 +18,7 @@ impl Client {
     }
 
     /// Executes a request against the Raft cluster.
-    async fn request(&self, request: Request) -> Result<Response> {
+    async fn request(&self, request: Request) -> Result<Response> { // study: Entry of sending request to raft cluster
         let (response_tx, response_rx) = oneshot::channel();
         self.request_tx.send((request, response_tx))?;
         response_rx.await?

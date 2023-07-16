@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::raft;
 use crate::sql;
-use crate::sql::engine::{Engine as _, Mode};
+use crate::sql::engine::{EngineTrait as _, Mode};
 use crate::sql::execution::ResultSet;
 use crate::sql::schema::{Catalog as _, Table};
 use crate::sql::types::Row;
@@ -19,7 +19,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 /// A toyDB server.
 pub struct Server {
-    raft: raft::Server,
+    raft: raft::RaftServer,
     raft_listener: Option<TcpListener>,
     sql_listener: Option<TcpListener>,
 }
@@ -30,14 +30,14 @@ impl Server {
         id: &str,
         peers: HashMap<String, String>,
         raft_store: Box<dyn log::Store>,
-        sql_store: Box<dyn kv::Store>,
+        sql_store: Box<dyn kv::StoreTrait>,
     ) -> Result<Self> {
         Ok(Server {
-            raft: raft::Server::new(
+            raft: raft::RaftServer::new(
                 id,
                 peers,
                 raft::Log::new(raft_store)?,
-                Box::new(sql::engine::Raft::new_state(kv::MVCC::new(sql_store))?),
+                Box::new(sql::engine::Raft::new_state_machine(kv::MVCC::new(sql_store))?),
             )
             .await?,
             raft_listener: None,
@@ -112,14 +112,14 @@ pub enum Response {
 
 /// A client session coupled to a SQL session.
 pub struct Session {
-    engine: sql::engine::Raft,
-    sql: sql::engine::Session<sql::engine::Raft>,
+    raft: sql::engine::Raft,
+    session: sql::engine::Session<sql::engine::Raft>,
 }
 
 impl Session {
     /// Creates a new client session.
     fn new(engine: sql::engine::Raft) -> Result<Self> {
-        Ok(Self { sql: engine.session()?, engine })
+        Ok(Self { session: engine.session()?, raft: engine })
     }
 
     /// Handles a client connection.
@@ -128,6 +128,8 @@ impl Session {
             Framed::new(socket, LengthDelimitedCodec::new()),
             tokio_serde::formats::Bincode::default(),
         );
+
+        // study: Infinitely waiting for messages from client
         while let Some(request) = stream.try_next().await? {
             let mut response = tokio::task::block_in_place(|| self.request(request));
             let mut rows: Box<dyn Iterator<Item = Result<Response>> + Send> =
@@ -159,22 +161,22 @@ impl Session {
     /// Executes a request.
     pub fn request(&mut self, request: Request) -> Result<Response> {
         Ok(match request {
-            Request::Execute(query) => Response::Execute(self.sql.execute(&query)?),
+            Request::Execute(query) => Response::Execute(self.session.execute(&query)?),
             Request::GetTable(table) => Response::GetTable(
-                self.sql.with_txn(Mode::ReadOnly, |txn| txn.must_read_table(&table))?,
+                self.session.with_txn(Mode::ReadOnly, |txn| txn.must_read_table(&table))?,
             ),
             Request::ListTables => {
-                Response::ListTables(self.sql.with_txn(Mode::ReadOnly, |txn| {
+                Response::ListTables(self.session.with_txn(Mode::ReadOnly, |txn| {
                     Ok(txn.scan_tables()?.map(|t| t.name).collect())
                 })?)
             }
-            Request::Status => Response::Status(self.engine.status()?),
+            Request::Status => Response::Status(self.raft.status()?),
         })
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        tokio::task::block_in_place(|| self.sql.execute("ROLLBACK").ok());
+        tokio::task::block_in_place(|| self.session.execute("ROLLBACK").ok());
     }
 }

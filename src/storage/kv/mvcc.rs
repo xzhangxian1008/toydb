@@ -1,4 +1,4 @@
-use super::{encoding, Range, Store};
+use super::{encoding, Range, StoreTrait};
 use crate::error::{Error, Result};
 
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ pub struct Status {
 /// An MVCC-based transactional key-value store.
 pub struct MVCC {
     /// The underlying KV store. It is protected by a mutex so it can be shared between txns.
-    store: Arc<RwLock<Box<dyn Store>>>,
+    store: Arc<RwLock<Box<dyn StoreTrait>>>,
 }
 
 impl Clone for MVCC {
@@ -31,24 +31,24 @@ impl Clone for MVCC {
 
 impl MVCC {
     /// Creates a new MVCC key-value store with the given key-value store for storage.
-    pub fn new(store: Box<dyn Store>) -> Self {
+    pub fn new(store: Box<dyn StoreTrait>) -> Self {
         Self { store: Arc::new(RwLock::new(store)) }
     }
 
     /// Begins a new transaction in read-write mode.
     #[allow(dead_code)]
-    pub fn begin(&self) -> Result<Transaction> {
-        Transaction::begin(self.store.clone(), Mode::ReadWrite)
+    pub fn begin(&self) -> Result<MVCCTransaction> {
+        MVCCTransaction::begin(self.store.clone(), Mode::ReadWrite)
     }
 
     /// Begins a new transaction in the given mode.
-    pub fn begin_with_mode(&self, mode: Mode) -> Result<Transaction> {
-        Transaction::begin(self.store.clone(), mode)
+    pub fn begin_with_mode(&self, mode: Mode) -> Result<MVCCTransaction> {
+        MVCCTransaction::begin(self.store.clone(), mode)
     }
 
     /// Resumes a transaction with the given ID.
-    pub fn resume(&self, id: u64) -> Result<Transaction> {
-        Transaction::resume(self.store.clone(), id)
+    pub fn resume(&self, id: u64) -> Result<MVCCTransaction> {
+        MVCCTransaction::resume(self.store.clone(), id)
     }
 
     /// Fetches an unversioned metadata value
@@ -96,9 +96,9 @@ fn deserialize<'a, V: Deserialize<'a>>(bytes: &'a [u8]) -> Result<V> {
 }
 
 /// An MVCC transaction.
-pub struct Transaction {
+pub struct MVCCTransaction {
     /// The underlying store for the transaction. Shared between transactions using a mutex.
-    store: Arc<RwLock<Box<dyn Store>>>,
+    store: Arc<RwLock<Box<dyn StoreTrait>>>,
     /// The unique transaction ID.
     id: u64,
     /// The transaction mode.
@@ -107,15 +107,22 @@ pub struct Transaction {
     snapshot: Snapshot,
 }
 
-impl Transaction {
+impl MVCCTransaction {
     /// Begins a new transaction in the given mode.
-    fn begin(store: Arc<RwLock<Box<dyn Store>>>, mode: Mode) -> Result<Self> {
+    /// What does beginning a transaction do?
+    ///   1. get the transaction id
+    ///   2. get the snapshot
+    /// todo what does the snapshot do?
+    fn begin(store: Arc<RwLock<Box<dyn StoreTrait>>>, mode: Mode) -> Result<Self> {
         let mut session = store.write()?;
 
+        // Get the transaction id
         let id = match session.get(&Key::TxnNext.encode())? {
             Some(ref v) => deserialize(v)?,
             None => 1,
         };
+
+        // Update the next transaction id, so that the next transaction could get his transaction id
         session.set(&Key::TxnNext.encode(), serialize(&(id + 1))?)?;
         session.set(&Key::TxnActive(id).encode(), serialize(&mode)?)?;
 
@@ -132,7 +139,10 @@ impl Transaction {
     }
 
     /// Resumes an active transaction with the given ID. Errors if the transaction is not active.
-    fn resume(store: Arc<RwLock<Box<dyn Store>>>, id: u64) -> Result<Self> {
+    /// What does resuming a transaction do?
+    ///   1. resotre the Snapshot
+    /// todo what does the snapshot do?
+    fn resume(store: Arc<RwLock<Box<dyn StoreTrait>>>, id: u64) -> Result<Self> {
         let session = store.read()?;
         let mode = match session.get(&Key::TxnActive(id).encode())? {
             Some(v) => deserialize(&v)?,
@@ -157,6 +167,9 @@ impl Transaction {
     }
 
     /// Commits the transaction, by removing the txn from the active set.
+    /// Do list:
+    ///   1. delete self transaction id
+    ///   2. flush(Maybe flush data to disk. However, toydb's storage is memory, so it always returns true)
     pub fn commit(self) -> Result<()> {
         let mut session = self.store.write()?;
         session.delete(&Key::TxnActive(self.id).encode())?;
@@ -259,6 +272,7 @@ impl Transaction {
     }
 
     /// Writes a value for a key. None is used for deletion.
+    /// study: Write data here
     fn write(&self, key: &[u8], value: Option<Vec<u8>>) -> Result<()> {
         if !self.mode.mutable() {
             return Err(Error::ReadOnly);
@@ -342,7 +356,7 @@ struct Snapshot {
 
 impl Snapshot {
     /// Takes a new snapshot, persisting it as `Key::TxnSnapshot(version)`.
-    fn take(session: &mut RwLockWriteGuard<Box<dyn Store>>, version: u64) -> Result<Self> {
+    fn take(session: &mut RwLockWriteGuard<Box<dyn StoreTrait>>, version: u64) -> Result<Self> {
         let mut snapshot = Self { version, invisible: HashSet::new() };
         let mut scan =
             session.scan(Range::from(Key::TxnActive(0).encode()..Key::TxnActive(version).encode()));
@@ -358,7 +372,7 @@ impl Snapshot {
     }
 
     /// Restores an existing snapshot from `Key::TxnSnapshot(version)`, or errors if not found.
-    fn restore(session: &RwLockReadGuard<Box<dyn Store>>, version: u64) -> Result<Self> {
+    fn restore(session: &RwLockReadGuard<Box<dyn StoreTrait>>, version: u64) -> Result<Self> {
         match session.get(&Key::TxnSnapshot(version).encode())? {
             Some(ref v) => Ok(Self { version, invisible: deserialize(v)? }),
             None => Err(Error::Value(format!("Snapshot not found for version {}", version))),

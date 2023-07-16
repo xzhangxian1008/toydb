@@ -3,7 +3,7 @@ mod planner;
 use optimizer::Optimizer as _;
 use planner::Planner;
 
-use super::engine::Transaction;
+use super::engine::TransactionTrait;
 use super::execution::{Executor, ResultSet};
 use super::parser::ast;
 use super::schema::{Catalog, Table};
@@ -30,7 +30,7 @@ impl Plan {
     }
 
     /// Executes the plan, consuming it.
-    pub fn execute<T: Transaction + 'static>(self, txn: &mut T) -> Result<ResultSet> {
+    pub fn execute<T: TransactionTrait + 'static>(self, txn: &mut T) -> Result<ResultSet> {
         <dyn Executor<T>>::build(self.0).execute(txn)
     }
 

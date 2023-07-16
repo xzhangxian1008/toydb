@@ -1,4 +1,4 @@
-use super::super::engine::Transaction;
+use super::super::engine::TransactionTrait;
 use super::super::plan::Aggregate;
 use super::super::types::{Column, Value};
 use super::{Executor, ResultSet};
@@ -8,19 +8,19 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 /// An aggregation executor
-pub struct Aggregation<T: Transaction> {
+pub struct Aggregation<T: TransactionTrait> {
     source: Box<dyn Executor<T>>,
     aggregates: Vec<Aggregate>,
     accumulators: HashMap<Vec<Value>, Vec<Box<dyn Accumulator>>>,
 }
 
-impl<T: Transaction> Aggregation<T> {
+impl<T: TransactionTrait> Aggregation<T> {
     pub fn new(source: Box<dyn Executor<T>>, aggregates: Vec<Aggregate>) -> Box<Self> {
         Box::new(Self { source, aggregates, accumulators: HashMap::new() })
     }
 }
 
-impl<T: Transaction> Executor<T> for Aggregation<T> {
+impl<T: TransactionTrait> Executor<T> for Aggregation<T> {
     #[allow(clippy::or_fun_call)]
     fn execute(mut self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         let agg_count = self.aggregates.len();

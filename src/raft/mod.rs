@@ -9,5 +9,5 @@ pub use self::log::{Entry, Log, Scan};
 pub use client::Client;
 pub use message::{Address, Event, Message, Request, Response};
 pub use node::{Node, Status};
-pub use server::Server;
-pub use state::{Driver, Instruction, State};
+pub use server::RaftServer;
+pub use state::{Driver, Instruction, StateMachine};

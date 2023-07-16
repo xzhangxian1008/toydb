@@ -8,7 +8,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt as _;
 
 /// A Raft-managed state machine.
-pub trait State: Send {
+pub trait StateMachine: Send {
     /// Returns the last applied index from the state machine, used when initializing the driver.
     fn applied_index(&self) -> u64;
 
@@ -74,9 +74,9 @@ impl Driver {
     }
 
     /// Drives a state machine.
-    pub async fn drive(mut self, mut state: Box<dyn State>) -> Result<()> {
+    pub async fn drive(mut self, mut state: Box<dyn StateMachine>) -> Result<()> {
         debug!("Starting state machine driver");
-        while let Some(instruction) = self.state_rx.next().await {
+        while let Some(instruction) = self.state_rx.next().await { // study: continuously drive state machine to apply commands
             if let Err(error) = self.execute(instruction, &mut *state).await {
                 error!("Halting state machine due to error: {}", error);
                 return Err(error);
@@ -87,7 +87,7 @@ impl Driver {
     }
 
     /// Synchronously (re)plays a set of log entries, for initial sync.
-    pub fn replay<'a>(&mut self, state: &mut dyn State, mut scan: Scan<'a>) -> Result<()> {
+    pub fn replay<'a>(&mut self, state: &mut dyn StateMachine, mut scan: Scan<'a>) -> Result<()> {
         while let Some(entry) = scan.next().transpose()? {
             debug!("Replaying {:?}", entry);
             if let Some(command) = entry.command {
@@ -101,7 +101,7 @@ impl Driver {
     }
 
     /// Executes a state machine instruction.
-    pub async fn execute(&mut self, i: Instruction, state: &mut dyn State) -> Result<()> {
+    pub async fn execute(&mut self, i: Instruction, state: &mut dyn StateMachine) -> Result<()> {
         debug!("Executing {:?}", i);
         match i {
             Instruction::Abort => {
@@ -186,7 +186,7 @@ impl Driver {
     }
 
     /// Executes any queries that are ready.
-    fn query_execute(&mut self, state: &mut dyn State) -> Result<()> {
+    fn query_execute(&mut self, state: &mut dyn StateMachine) -> Result<()> {
         for query in self.query_ready(self.applied_index) {
             debug!("Executing query {:?}", query.command);
             let result = state.query(query.command);
@@ -271,7 +271,7 @@ pub mod tests {
         }
     }
 
-    impl State for TestState {
+    impl StateMachine for TestState {
         fn applied_index(&self) -> u64 {
             *self.applied_index.lock().unwrap()
         }

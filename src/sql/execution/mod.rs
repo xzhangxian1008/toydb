@@ -12,7 +12,7 @@ use query::{Filter, Limit, Offset, Order, Projection};
 use schema::{CreateTable, DropTable};
 use source::{IndexLookup, KeyLookup, Nothing, Scan};
 
-use super::engine::{Mode, Transaction};
+use super::engine::{Mode, TransactionTrait};
 use super::plan::Node;
 use super::types::{Columns, Row, Rows, Value};
 use crate::error::{Error, Result};
@@ -21,12 +21,12 @@ use derivative::Derivative;
 use serde_derive::{Deserialize, Serialize};
 
 /// A plan executor
-pub trait Executor<T: Transaction> {
+pub trait Executor<T: TransactionTrait> {
     /// Executes the executor, consuming it and returning a result set
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet>;
 }
 
-impl<T: Transaction + 'static> dyn Executor<T> {
+impl<T: TransactionTrait + 'static> dyn Executor<T> {
     /// Builds an executor for a plan node, consuming it
     pub fn build(node: Node) -> Box<dyn Executor<T>> {
         match node {

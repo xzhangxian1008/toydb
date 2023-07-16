@@ -1,4 +1,4 @@
-use super::super::engine::Transaction;
+use super::super::engine::TransactionTrait;
 use super::super::types::{Column, Expression, Row, Value};
 use super::{Executor, ResultSet};
 use crate::error::Result;
@@ -17,8 +17,9 @@ impl Scan {
     }
 }
 
-impl<T: Transaction> Executor<T> for Scan {
+impl<T: TransactionTrait> Executor<T> for Scan {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
+        // study: `select * from xxx;` will enter here first
         let table = txn.must_read_table(&self.table)?;
         Ok(ResultSet::Query {
             columns: table.columns.iter().map(|c| Column { name: Some(c.name.clone()) }).collect(),
@@ -39,7 +40,7 @@ impl KeyLookup {
     }
 }
 
-impl<T: Transaction> Executor<T> for KeyLookup {
+impl<T: TransactionTrait> Executor<T> for KeyLookup {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         let table = txn.must_read_table(&self.table)?;
 
@@ -70,7 +71,7 @@ impl IndexLookup {
     }
 }
 
-impl<T: Transaction> Executor<T> for IndexLookup {
+impl<T: TransactionTrait> Executor<T> for IndexLookup {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         let table = txn.must_read_table(&self.table)?;
 
@@ -101,7 +102,7 @@ impl Nothing {
     }
 }
 
-impl<T: Transaction> Executor<T> for Nothing {
+impl<T: TransactionTrait> Executor<T> for Nothing {
     fn execute(self: Box<Self>, _: &mut T) -> Result<ResultSet> {
         Ok(ResultSet::Query {
             columns: Vec::new(),

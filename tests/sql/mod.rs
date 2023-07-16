@@ -4,7 +4,7 @@ mod query;
 mod schema;
 
 use toydb::error::Result;
-use toydb::sql::engine::{Engine, KV};
+use toydb::sql::engine::{EngineTrait, KV};
 use toydb::storage::kv;
 
 /// Sets up a basic in-memory SQL engine with an initial dataset.
