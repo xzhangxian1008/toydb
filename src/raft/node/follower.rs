@@ -91,7 +91,7 @@ impl RoleNode<Follower> {
                         self.log.commit(commit_index)?;
                         let mut scan = self.log.scan((old_commit_index + 1)..=commit_index);
                         while let Some(entry) = scan.next().transpose()? {
-                            self.state_tx.send(Instruction::Apply { entry })?;
+                            self.state_machine_tx.send(Instruction::Apply { entry })?;
                         }
                     }
                     self.send(msg.from, Event::ConfirmLeader { commit_index, has_committed })?;
@@ -207,7 +207,7 @@ pub mod tests {
             term: 3,
             log,
             node_tx,
-            state_tx,
+            state_machine_tx: state_tx,
             proxied_reqs: HashMap::new(),
             queued_reqs: Vec::new(),
             role: Follower::new(Some("b"), None),

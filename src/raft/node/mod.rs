@@ -74,7 +74,7 @@ impl Node {
             term,
             log,
             node_tx,
-            state_tx,
+            state_machine_tx: state_tx,
             queued_reqs: Vec::new(),
             proxied_reqs: HashMap::new(),
             role: Follower::new(None, voted_for.as_deref()),
@@ -142,7 +142,7 @@ pub struct RoleNode<R> {
     term: u64,
     log: Log,
     node_tx: mpsc::UnboundedSender<Message>,
-    state_tx: mpsc::UnboundedSender<Instruction>,
+    state_machine_tx: mpsc::UnboundedSender<Instruction>,
     /// Keeps track of queued client requests received e.g. during elections.
     queued_reqs: Vec<(Address, Event)>,
     /// Keeps track of proxied client requests, to abort on new leader election.
@@ -159,7 +159,7 @@ impl<R> RoleNode<R> {
             term: self.term,
             log: self.log,
             node_tx: self.node_tx,
-            state_tx: self.state_tx,
+            state_machine_tx: self.state_machine_tx,
             queued_reqs: self.queued_reqs,
             proxied_reqs: self.proxied_reqs,
             role,
@@ -419,7 +419,7 @@ mod tests {
             term: 1,
             log: Log::new(Box::new(log::Test::new()))?,
             node_tx,
-            state_tx,
+            state_machine_tx: state_tx,
             proxied_reqs: HashMap::new(),
             queued_reqs: Vec::new(),
         };

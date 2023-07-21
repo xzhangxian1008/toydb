@@ -49,7 +49,7 @@ struct Query {
 
 /// Drives a state machine, taking operations from state_rx and sending results via node_tx.
 pub struct Driver {
-    state_rx: UnboundedReceiverStream<Instruction>,
+    state_machine_rx: UnboundedReceiverStream<Instruction>,
     node_tx: mpsc::UnboundedSender<Message>,
     applied_index: u64,
     /// Notify clients when their mutation is applied. <index, (client, id)>
@@ -65,7 +65,7 @@ impl Driver {
         node_tx: mpsc::UnboundedSender<Message>,
     ) -> Self {
         Self {
-            state_rx: UnboundedReceiverStream::new(state_rx),
+            state_machine_rx: UnboundedReceiverStream::new(state_rx),
             node_tx,
             applied_index: 0,
             notify: HashMap::new(),
@@ -76,7 +76,7 @@ impl Driver {
     /// Drives a state machine.
     pub async fn drive(mut self, mut state: Box<dyn StateMachine>) -> Result<()> {
         debug!("Starting state machine driver");
-        while let Some(instruction) = self.state_rx.next().await { // study: continuously drive state machine to apply commands
+        while let Some(instruction) = self.state_machine_rx.next().await { // study: continuously drive state machine to apply commands
             if let Err(error) = self.execute(instruction, &mut *state).await {
                 error!("Halting state machine due to error: {}", error);
                 return Err(error);
@@ -100,8 +100,8 @@ impl Driver {
         Ok(())
     }
 
-    /// Executes a state machine instruction.
-    pub async fn execute(&mut self, i: Instruction, state: &mut dyn StateMachine) -> Result<()> {
+    /// study: Executes a state machine instruction.
+    pub async fn execute(&mut self, i: Instruction, state_machine: &mut dyn StateMachine) -> Result<()> {
         debug!("Executing {:?}", i);
         match i {
             Instruction::Abort => {
@@ -112,7 +112,7 @@ impl Driver {
             Instruction::Apply { entry: Entry { index, command, .. } } => {
                 if let Some(command) = command {
                     debug!("Applying state machine command {}: {:?}", index, command);
-                    match tokio::task::block_in_place(|| state.mutate(index, command)) {
+                    match tokio::task::block_in_place(|| state_machine.mutate(index, command)) {
                         Err(error @ Error::Internal(_)) => return Err(error),
                         result => self.notify_applied(index, result)?,
                     };
@@ -122,11 +122,11 @@ impl Driver {
                 self.applied_index = index;
                 // Try to execute any pending queries, since they may have been submitted for a
                 // commit_index which hadn't been applied yet.
-                self.query_execute(state)?;
+                self.query_execute(state_machine)?;
             }
 
             Instruction::Notify { id, address, index } => {
-                if index > state.applied_index() {
+                if index > state_machine.applied_index() {
                     self.notify.insert(index, (address, id));
                 } else {
                     self.send(address, Event::ClientResponse { id, response: Err(Error::Abort) })?;
@@ -141,7 +141,7 @@ impl Driver {
             }
 
             Instruction::Status { id, address, mut status } => {
-                status.apply_index = state.applied_index();
+                status.apply_index = state_machine.applied_index();
                 self.send(
                     address,
                     Event::ClientResponse { id, response: Ok(Response::Status(*status)) },
@@ -150,7 +150,7 @@ impl Driver {
 
             Instruction::Vote { term, index, address } => {
                 self.query_vote(term, index, address);
-                self.query_execute(state)?;
+                self.query_execute(state_machine)?;
             }
         }
         Ok(())
@@ -186,10 +186,10 @@ impl Driver {
     }
 
     /// Executes any queries that are ready.
-    fn query_execute(&mut self, state: &mut dyn StateMachine) -> Result<()> {
-        for query in self.query_ready(self.applied_index) {
+    fn query_execute(&mut self, state_machine: &mut dyn StateMachine) -> Result<()> {
+        for query in self.get_ready_queries(self.applied_index) {
             debug!("Executing query {:?}", query.command);
-            let result = state.query(query.command);
+            let result = state_machine.query(query.command);
             if let Err(error @ Error::Internal(_)) = result {
                 return Err(error);
             }
@@ -202,7 +202,7 @@ impl Driver {
     }
 
     /// Fetches and removes any ready queries, where index <= applied_index.
-    fn query_ready(&mut self, applied_index: u64) -> Vec<Query> {
+    fn get_ready_queries(&mut self, applied_index: u64) -> Vec<Query> {
         let mut ready = Vec::new();
         let mut empty = Vec::new();
         for (index, queries) in self.queries.range_mut(..=applied_index) {

@@ -1,4 +1,4 @@
-use super::{Range, Scan, StoreTrait};
+use super::{Range, ScanIter, StoreTrait};
 use crate::error::{Error, Result};
 
 use std::cmp::Ordering;
@@ -60,7 +60,7 @@ impl StoreTrait for Memory {
         Ok(self.root.read()?.get(key))
     }
 
-    fn scan(&self, range: Range) -> Scan {
+    fn scan(&self, range: Range) -> ScanIter {
         Box::new(Iter::new(self.root.clone(), range))
     }
 

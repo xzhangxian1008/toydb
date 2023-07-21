@@ -1,4 +1,4 @@
-use super::{Range, Scan, StoreTrait};
+use super::{Range, ScanIter, StoreTrait};
 use crate::error::Result;
 
 use std::collections::BTreeMap;
@@ -36,7 +36,7 @@ impl StoreTrait for StdMemory {
         Ok(self.data.get(key).cloned())
     }
 
-    fn scan(&self, range: Range) -> Scan {
+    fn scan(&self, range: Range) -> ScanIter {
         // FIXME Since the range iterator returns borrowed items it would require a read-lock for
         // the duration of the iteration. This is too coarse, so we buffer the entire iteration
         // here. An iterator with an arc-mutex should be used instead, which is able to resume

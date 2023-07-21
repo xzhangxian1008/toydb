@@ -12,30 +12,30 @@ use std::collections::HashSet;
 /// A SQL engine based on an underlying MVCC key/value store
 pub struct KV {
     /// The underlying key/value store
-    pub(super) kv: kv::MVCC,
+    pub(super) kv_store: kv::MVCC,
 }
 
 // FIXME Implement Clone manually due to https://github.com/rust-lang/rust/issues/26925
 impl Clone for KV {
     fn clone(&self) -> Self {
-        KV::new(self.kv.clone())
+        KV::new(self.kv_store.clone())
     }
 }
 
 impl KV {
     /// Creates a new key/value-based SQL engine
     pub fn new(kv: kv::MVCC) -> Self {
-        Self { kv }
+        Self { kv_store: kv }
     }
 
     /// Fetches an unversioned metadata value
     pub fn get_metadata(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        self.kv.get_metadata(key)
+        self.kv_store.get_metadata(key)
     }
 
     /// Sets an unversioned metadata value
     pub fn set_metadata(&self, key: &[u8], value: Vec<u8>) -> Result<()> {
-        self.kv.set_metadata(key, value)
+        self.kv_store.set_metadata(key, value)
     }
 }
 
@@ -43,11 +43,11 @@ impl super::EngineTrait for KV {
     type Transaction = SQLTransaction;
 
     fn begin(&self, mode: super::Mode) -> Result<Self::Transaction> {
-        Ok(Self::Transaction::new(self.kv.begin_with_mode(mode)?))
+        Ok(Self::Transaction::new(self.kv_store.begin_with_mode(mode)?))
     }
 
     fn resume(&self, id: u64) -> Result<Self::Transaction> {
-        Ok(Self::Transaction::new(self.kv.resume(id)?))
+        Ok(Self::Transaction::new(self.kv_store.resume(id)?))
     }
 }
 
@@ -63,19 +63,19 @@ fn deserialize<'a, V: Deserialize<'a>>(bytes: &'a [u8]) -> Result<V> {
 
 /// An SQL transaction based on an MVCC key/value transaction
 pub struct SQLTransaction {
-    txn: kv::mvcc::MVCCTransaction,
+    mvcc_txn: kv::mvcc::MVCCTransaction,
 }
 
 impl SQLTransaction {
     /// Creates a new SQL transaction from an MVCC transaction
     fn new(txn: kv::mvcc::MVCCTransaction) -> Self {
-        Self { txn }
+        Self { mvcc_txn: txn }
     }
 
     /// Loads an index entry
     fn index_load(&self, table: &str, column: &str, value: &Value) -> Result<HashSet<Value>> {
         Ok(self
-            .txn
+            .mvcc_txn
             .get(&Key::Index(table.into(), column.into(), Some(value.into())).encode())?
             .map(|v| deserialize(&v))
             .transpose()?
@@ -92,28 +92,28 @@ impl SQLTransaction {
     ) -> Result<()> {
         let key = Key::Index(table.into(), column.into(), Some(value.into())).encode();
         if index.is_empty() {
-            self.txn.delete(&key)
+            self.mvcc_txn.delete(&key)
         } else {
-            self.txn.set(&key, serialize(&index)?)
+            self.mvcc_txn.set(&key, serialize(&index)?)
         }
     }
 }
 
 impl super::TransactionTrait for SQLTransaction {
     fn id(&self) -> u64 {
-        self.txn.id()
+        self.mvcc_txn.id()
     }
 
     fn mode(&self) -> super::Mode {
-        self.txn.mode()
+        self.mvcc_txn.mode()
     }
 
     fn commit(self) -> Result<()> {
-        self.txn.commit()
+        self.mvcc_txn.commit()
     }
 
     fn rollback(self) -> Result<()> {
-        self.txn.rollback()
+        self.mvcc_txn.rollback()
     }
 
     fn create(&mut self, table: &str, row: Row) -> Result<()> {
@@ -128,7 +128,7 @@ impl super::TransactionTrait for SQLTransaction {
         }
 
         // todo how to insert a key
-        self.txn.set(
+        self.mvcc_txn.set(
             &Key::Row(Cow::Borrowed(&table.name), Some(Cow::Borrowed(&id))).encode(),
             serialize(&row)?,
         )?;
@@ -174,11 +174,11 @@ impl super::TransactionTrait for SQLTransaction {
                 }
             }
         }
-        self.txn.delete(&Key::Row(table.name.into(), Some(id.into())).encode())
+        self.mvcc_txn.delete(&Key::Row(table.name.into(), Some(id.into())).encode())
     }
 
     fn read(&self, table: &str, id: &Value) -> Result<Option<Row>> {
-        self.txn
+        self.mvcc_txn
             .get(&Key::Row(table.into(), Some(id.into())).encode())?
             .map(|v| deserialize(&v))
             .transpose()
@@ -192,10 +192,10 @@ impl super::TransactionTrait for SQLTransaction {
     }
 
     // study: scan table
-    fn scan(&self, table: &str, filter: Option<Expression>) -> Result<super::Scan> {
+    fn scan(&self, table: &str, filter: Option<Expression>) -> Result<super::ScanIter> {
         let table = self.must_read_table(table)?;
         Ok(Box::new(
-            self.txn
+            self.mvcc_txn
                 .scan_prefix(&Key::Row((&table.name).into(), None).encode())?
                 .map(|r| r.and_then(|(_, v)| deserialize(&v)))
                 .filter_map(move |r| match r {
@@ -216,14 +216,14 @@ impl super::TransactionTrait for SQLTransaction {
         ))
     }
 
-    fn scan_index(&self, table: &str, column: &str) -> Result<super::IndexScan> {
+    fn scan_index(&self, table: &str, column: &str) -> Result<super::IndexScanIter> {
         let table = self.must_read_table(table)?;
         let column = table.get_column(column)?;
         if !column.index {
             return Err(Error::Value(format!("No index for {}.{}", table.name, column.name)));
         }
         Ok(Box::new(
-            self.txn
+            self.mvcc_txn
                 .scan_prefix(
                     &Key::Index((&table.name).into(), (&column.name).into(), None).encode(),
                 )?
@@ -266,7 +266,7 @@ impl super::TransactionTrait for SQLTransaction {
         }
 
         table.validate_row(&row, self)?;
-        self.txn.set(&Key::Row(table.name.into(), Some(id.into())).encode(), serialize(&row)?)
+        self.mvcc_txn.set(&Key::Row(table.name.into(), Some(id.into())).encode(), serialize(&row)?)
     }
 }
 
@@ -276,7 +276,7 @@ impl Catalog for SQLTransaction {
             return Err(Error::Value(format!("Table {} already exists", table.name)));
         }
         table.validate(self)?;
-        self.txn.set(&Key::Table(Some((&table.name).into())).encode(), serialize(&table)?)
+        self.mvcc_txn.set(&Key::Table(Some((&table.name).into())).encode(), serialize(&table)?)
     }
 
     fn delete_table(&mut self, table: &str) -> Result<()> {
@@ -291,16 +291,16 @@ impl Catalog for SQLTransaction {
         while let Some(row) = scan.next().transpose()? {
             self.delete(&table.name, &table.get_row_key(&row)?)?
         }
-        self.txn.delete(&Key::Table(Some(table.name.into())).encode())
+        self.mvcc_txn.delete(&Key::Table(Some(table.name.into())).encode())
     }
 
     fn read_table(&self, table: &str) -> Result<Option<Table>> {
-        self.txn.get(&Key::Table(Some(table.into())).encode())?.map(|v| deserialize(&v)).transpose()
+        self.mvcc_txn.get(&Key::Table(Some(table.into())).encode())?.map(|v| deserialize(&v)).transpose()
     }
 
     fn scan_tables(&self) -> Result<Tables> {
         Ok(Box::new(
-            self.txn
+            self.mvcc_txn
                 .scan_prefix(&Key::Table(None).encode())?
                 .map(|r| r.and_then(|(_, v)| deserialize(&v)))
                 .collect::<Result<Vec<_>>>()?

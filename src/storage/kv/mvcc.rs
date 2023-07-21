@@ -142,18 +142,18 @@ impl MVCCTransaction {
     /// What does resuming a transaction do?
     ///   1. resotre the Snapshot
     /// todo what does the snapshot do?
-    fn resume(store: Arc<RwLock<Box<dyn StoreTrait>>>, id: u64) -> Result<Self> {
-        let session = store.read()?;
-        let mode = match session.get(&Key::TxnActive(id).encode())? {
+    fn resume(store_arc: Arc<RwLock<Box<dyn StoreTrait>>>, id: u64) -> Result<Self> {
+        let store = store_arc.read()?;
+        let mode = match store.get(&Key::TxnActive(id).encode())? {
             Some(v) => deserialize(&v)?,
             None => return Err(Error::Value(format!("No active transaction {}", id))),
         };
         let snapshot = match &mode {
-            Mode::Snapshot { version } => Snapshot::restore(&session, *version)?,
-            _ => Snapshot::restore(&session, id)?,
+            Mode::Snapshot { version } => Snapshot::restore(&store, *version)?,
+            _ => Snapshot::restore(&store, id)?,
         };
-        std::mem::drop(session);
-        Ok(Self { store, id, mode, snapshot })
+        std::mem::drop(store);
+        Ok(Self { store: store_arc, id, mode, snapshot })
     }
 
     /// Returns the transaction ID.
@@ -227,7 +227,7 @@ impl MVCCTransaction {
     }
 
     /// Scans a key range.
-    pub fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<super::Scan> {
+    pub fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<super::ScanIter> {
         let start = match range.start_bound() {
             Bound::Excluded(k) => Bound::Excluded(Key::Record(k.into(), std::u64::MAX).encode()),
             Bound::Included(k) => Bound::Included(Key::Record(k.into(), 0).encode()),
@@ -243,7 +243,7 @@ impl MVCCTransaction {
     }
 
     /// Scans keys under a given prefix.
-    pub fn scan_prefix(&self, prefix: &[u8]) -> Result<super::Scan> {
+    pub fn scan_prefix(&self, prefix: &[u8]) -> Result<super::ScanIter> {
         if prefix.is_empty() {
             return Err(Error::Internal("Scan prefix cannot be empty".into()));
         }
@@ -356,10 +356,10 @@ struct Snapshot {
 
 impl Snapshot {
     /// Takes a new snapshot, persisting it as `Key::TxnSnapshot(version)`.
-    fn take(session: &mut RwLockWriteGuard<Box<dyn StoreTrait>>, version: u64) -> Result<Self> {
+    fn take(store: &mut RwLockWriteGuard<Box<dyn StoreTrait>>, version: u64) -> Result<Self> {
         let mut snapshot = Self { version, invisible: HashSet::new() };
         let mut scan =
-            session.scan(Range::from(Key::TxnActive(0).encode()..Key::TxnActive(version).encode()));
+            store.scan(Range::from(Key::TxnActive(0).encode()..Key::TxnActive(version).encode()));
         while let Some((key, _)) = scan.next().transpose()? {
             match Key::decode(&key)? {
                 Key::TxnActive(id) => snapshot.invisible.insert(id),
@@ -367,13 +367,13 @@ impl Snapshot {
             };
         }
         std::mem::drop(scan);
-        session.set(&Key::TxnSnapshot(version).encode(), serialize(&snapshot.invisible)?)?;
+        store.set(&Key::TxnSnapshot(version).encode(), serialize(&snapshot.invisible)?)?;
         Ok(snapshot)
     }
 
     /// Restores an existing snapshot from `Key::TxnSnapshot(version)`, or errors if not found.
-    fn restore(session: &RwLockReadGuard<Box<dyn StoreTrait>>, version: u64) -> Result<Self> {
-        match session.get(&Key::TxnSnapshot(version).encode())? {
+    fn restore(store: &RwLockReadGuard<Box<dyn StoreTrait>>, version: u64) -> Result<Self> {
+        match store.get(&Key::TxnSnapshot(version).encode())? {
             Some(ref v) => Ok(Self { version, invisible: deserialize(v)? }),
             None => Err(Error::Value(format!("Snapshot not found for version {}", version))),
         }
@@ -445,14 +445,14 @@ impl<'a> Key<'a> {
 pub struct Scan {
     /// The augmented KV store iterator, with key (decoded) and value. Note that we don't retain
     /// the decoded version, so there will be multiple keys (for each version). We want the last.
-    scan: Peekable<super::Scan>,
+    scan: Peekable<super::ScanIter>,
     /// Keeps track of next_back() seen key, whose previous versions should be ignored.
     next_back_seen: Option<Vec<u8>>,
 }
 
 impl Scan {
     /// Creates a new scan.
-    fn new(mut scan: super::Scan, snapshot: Snapshot) -> Self {
+    fn new(mut scan: super::ScanIter, snapshot: Snapshot) -> Self {
         // Augment the underlying scan to decode the key and filter invisible versions. We don't
         // return the version, since we don't need it, but beware that all versions of the key
         // will still be returned - we usually only need the last, which is what the next() and

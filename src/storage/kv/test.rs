@@ -1,4 +1,4 @@
-use super::{Memory, Range, Scan, StoreTrait};
+use super::{Memory, Range, ScanIter, StoreTrait};
 use crate::error::Result;
 
 use std::fmt::Display;
@@ -37,7 +37,7 @@ impl StoreTrait for Test {
         self.kv.read()?.get(key)
     }
 
-    fn scan(&self, range: Range) -> Scan {
+    fn scan(&self, range: Range) -> ScanIter {
         // Since the mutex guard is scoped to this method, we simply buffer the result.
         Box::new(self.kv.read().unwrap().scan(range).collect::<Vec<Result<_>>>().into_iter())
     }

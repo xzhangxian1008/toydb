@@ -38,7 +38,7 @@ impl RoleNode<Leader> {
         info!("Discovered new leader {} for term {}, following", leader, term);
         self.term = term;
         self.log.save_term(term, None)?;
-        self.state_tx.send(Instruction::Abort)?;
+        self.state_machine_tx.send(Instruction::Abort)?;
         self.become_role(Follower::new(Some(leader), None))
     }
 
@@ -67,7 +67,7 @@ impl RoleNode<Leader> {
                     self.log.commit(quorum_index)?;
                     let mut scan = self.log.scan((old_commit_index + 1)..=self.log.commit_index);
                     while let Some(entry) = scan.next().transpose()? {
-                        self.state_tx.send(Instruction::Apply { entry })?;
+                        self.state_machine_tx.send(Instruction::Apply { entry })?;
                     }
                 }
             }
@@ -113,7 +113,7 @@ impl RoleNode<Leader> {
         match msg.event {
             Event::ConfirmLeader { commit_index, has_committed } => {
                 if let Address::Peer(from) = msg.from.clone() {
-                    self.state_tx.send(Instruction::Vote {
+                    self.state_machine_tx.send(Instruction::Vote {
                         term: msg.term,
                         index: commit_index,
                         address: msg.from,
@@ -144,7 +144,7 @@ impl RoleNode<Leader> {
             }
 
             Event::ClientRequest { id, request: Request::Query(command) } => {
-                self.state_tx.send(Instruction::Query {
+                self.state_machine_tx.send(Instruction::Query {
                     id,
                     address: msg.from,
                     command,
@@ -152,7 +152,7 @@ impl RoleNode<Leader> {
                     index: self.log.commit_index,
                     quorum: self.quorum(),
                 })?;
-                self.state_tx.send(Instruction::Vote {
+                self.state_machine_tx.send(Instruction::Vote {
                     term: self.term,
                     index: self.log.commit_index,
                     address: Address::Local,
@@ -170,7 +170,7 @@ impl RoleNode<Leader> {
 
             Event::ClientRequest { id, request: Request::Mutate(command) } => {
                 let index = self.append(Some(command))?;
-                self.state_tx.send(Instruction::Notify { id, address: msg.from, index })?;
+                self.state_machine_tx.send(Instruction::Notify { id, address: msg.from, index })?;
                 if self.peers.is_empty() {
                     self.commit()?;
                 }
@@ -188,7 +188,7 @@ impl RoleNode<Leader> {
                     storage_size: self.log.store.size(),
                 });
                 status.node_last_index.insert(self.id.clone(), self.log.last_index);
-                self.state_tx.send(Instruction::Status { id, address: msg.from, status })?
+                self.state_machine_tx.send(Instruction::Status { id, address: msg.from, status })?
             }
 
             Event::ClientResponse { id, mut response } => {
@@ -264,7 +264,7 @@ mod tests {
             role: Leader::new(peers, log.last_index),
             log,
             node_tx,
-            state_tx,
+            state_machine_tx: state_tx,
             proxied_reqs: HashMap::new(),
             queued_reqs: Vec::new(),
         };

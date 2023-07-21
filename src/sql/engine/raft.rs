@@ -1,6 +1,6 @@
 use super::super::schema::{Catalog, Table, Tables};
 use super::super::types::{Expression, Row, Value};
-use super::{EngineTrait as _, IndexScan, Mode, Scan, TransactionTrait as _};
+use super::{EngineTrait as _, IndexScanIter, Mode, ScanIter, TransactionTrait as _};
 use crate::error::{Error, Result};
 use crate::raft;
 use crate::storage::kv;
@@ -201,7 +201,7 @@ impl super::TransactionTrait for RaftTransaction {
         })?)
     }
 
-    fn scan(&self, table: &str, filter: Option<Expression>) -> Result<Scan> {
+    fn scan(&self, table: &str, filter: Option<Expression>) -> Result<ScanIter> {
         Ok(Box::new(
             Raft::deserialize::<Vec<_>>(&self.query(Query::Scan {
                 txn_id: self.id,
@@ -213,7 +213,7 @@ impl super::TransactionTrait for RaftTransaction {
         ))
     }
 
-    fn scan_index(&self, table: &str, column: &str) -> Result<IndexScan> {
+    fn scan_index(&self, table: &str, column: &str) -> Result<IndexScanIter> {
         Ok(Box::new(
             Raft::deserialize::<Vec<_>>(&self.query(Query::ScanIndex {
                 txn_id: self.id,
@@ -350,7 +350,7 @@ impl raft::StateMachine for StateMachine {
                     .scan_index(&table, &column)?
                     .collect::<Result<Vec<_>>>()?,
             ),
-            Query::Status => Raft::serialize(&self.underlying_engine.kv.status()?),
+            Query::Status => Raft::serialize(&self.underlying_engine.kv_store.status()?),
 
             Query::ReadTable { txn_id, table } => {
                 Raft::serialize(&self.underlying_engine.resume(txn_id)?.read_table(&table)?)

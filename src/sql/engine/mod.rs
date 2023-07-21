@@ -50,9 +50,9 @@ pub trait TransactionTrait: Catalog {
     /// Reads an index entry, if it exists
     fn read_index(&self, table: &str, column: &str, value: &Value) -> Result<HashSet<Value>>;
     /// Scans a table's rows
-    fn scan(&self, table: &str, filter: Option<Expression>) -> Result<Scan>;
+    fn scan(&self, table: &str, filter: Option<Expression>) -> Result<ScanIter>;
     /// Scans a column's index entries
-    fn scan_index(&self, table: &str, column: &str) -> Result<IndexScan>;
+    fn scan_index(&self, table: &str, column: &str) -> Result<IndexScanIter>;
     /// Updates a table row
     fn update(&mut self, table: &str, id: &Value, row: Row) -> Result<()>;
 }
@@ -176,7 +176,7 @@ impl<E: EngineTrait + 'static> Session<E> {
 pub type Mode = crate::storage::kv::mvcc::Mode;
 
 /// A row scan iterator
-pub type Scan = Box<dyn DoubleEndedIterator<Item = Result<Row>> + Send>;
+pub type ScanIter = Box<dyn DoubleEndedIterator<Item = Result<Row>> + Send>;
 
 /// An index scan iterator
-pub type IndexScan = Box<dyn DoubleEndedIterator<Item = Result<(Value, HashSet<Value>)>> + Send>;
+pub type IndexScanIter = Box<dyn DoubleEndedIterator<Item = Result<(Value, HashSet<Value>)>> + Send>;

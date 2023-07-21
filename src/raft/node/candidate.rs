@@ -163,7 +163,7 @@ mod tests {
             term: 3,
             log,
             node_tx,
-            state_tx,
+            state_machine_tx: state_tx,
             queued_reqs: Vec::new(),
             proxied_reqs: HashMap::new(),
             role: Candidate::new(),
